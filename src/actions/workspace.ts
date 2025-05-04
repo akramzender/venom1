@@ -2,6 +2,8 @@
 
 import { currentUser, User } from "@clerk/nextjs/server";
 import { client } from "@/lib/prisma";
+import { error } from "console";
+import { sendEmail } from "./user";
 
 export const verifyAccesToWorkspace = async (workspaceId: string) => {
     try {
@@ -9,6 +11,7 @@ export const verifyAccesToWorkspace = async (workspaceId: string) => {
         if (!user) {
             return { status: 403, message: "Unauthorized" };
         }
+        
         const isUserInWorkspace = await client.workspace.findUnique({
             where: { 
                 id: workspaceId, 
@@ -57,13 +60,13 @@ export const getWorkspaceFolders = async (workspaceId: string) => {
             }
         });
         
-        if (isFolders.length>0 && !isFolders) {
-            return { status:200, data: { folders: [] } };
+        if (isFolders && isFolders.length>0  ) {
+            return { status:200, data:  isFolders};
         }
         
-        return { status: 404, data: { folders: isFolders } };
+        return { status: 404, data: [] };
     } catch (error) {
-        return { status:403, data: { folders: [] } };
+        return { status:403, data: [] };
     }
 }
 export const getAllUserVideos = async (workSpaceId: string) => {
@@ -106,7 +109,7 @@ export const getAllUserVideos = async (workSpaceId: string) => {
         });
         
         if(videos.length>0 && videos) {
-            return { status: 200, data: { videos } };
+            return { status: 200, data: videos  };
  } 
  return { status: 404 };
     } catch (error) {
@@ -128,7 +131,7 @@ export const getWorkspaces = async () => {
                 subscription: {
                     select: {
                         plan: true
-                    }
+                    },
                 },
                 workspace: {
                     select: {
@@ -137,7 +140,7 @@ export const getWorkspaces = async () => {
                         type: true
                     }
                 },
-                member: {
+                members: {
                     select: {
                         workspace: {
                             select: {
@@ -153,12 +156,280 @@ export const getWorkspaces = async () => {
         if (workspaces) {
             return { 
                 status: 200, 
-                data: { workspaces: workspaces?.workspace || [] } 
+                data:  workspaces 
             };
         }
        
     } catch (error) {
-        return { status: 400, data: { workspaces: [] } };
+        return { status: 400 };
     }
 }
 
+export const createWorkspace = async (name:string)=>{
+    try{
+        const user = await currentUser()
+        if (!user) return {status : 404}
+        const authorized = await client.user.findUnique({
+            where : {
+                clerkid : user.id,
+            },
+            select : {
+                subscription:{
+                    select : {
+                        plan : true
+                    }
+                }
+            }
+        })
+        if(authorized?.subscription?.plan === "PRO"){
+            const workspace = await client.user.update({
+                where: {
+                    clerkid: user.id,
+                },
+                data:{
+                    workspace:{
+                        create:{
+                            name,
+                            type: "PUBLIC"
+                        },
+                    },
+                },
+            
+            })
+            
+        
+            if(workspace){
+                return {status:200 , data : "Workspace Created"}
+            }
+console.log(workspace)
+        }
+        return {status : 401 , data : "You are not authorized to create a workspace"}
+       
+    }catch(error){
+        return {status:400 , data : 'bla' }
+    }
+}
+export const renameFolders = async(folderId:string , name:string) => {
+    try{
+        const folder = await client.folder.update({
+            where: {
+                id:folderId,
+            },
+            data:{
+                name,
+            }
+        })
+        if (folder){
+            return {status : 200 , data : 'Folder Renamed'}
+        }
+        return{status : 400 , data : 'Folder does not exist !'}
+    }catch(error){
+        return {status : 500 , data :'Opps ! something went wrong'}
+    }
+}
+
+export const createFolder = async (workspaceId:string)=>{
+    try {
+        const isNewFolder = await client.workspace.update({
+            where :{
+                id : workspaceId
+            },
+            data : {
+                folders : {
+                    create : {name : 'Untitled'}
+                }
+            }
+        })
+        if (isNewFolder){
+            return {status : 200 , message : 'New Folder created'}
+        }
+       
+    }catch(error){
+        return {status : 500 , message : 'Opps ! something went wrong'}
+    }
+}
+export const getFolderInfo = async (folderId:string)=> {
+    try{
+        const folder = await client.folder.findUnique({
+            where : {
+                id : folderId
+            },
+            select : {
+                name : true,
+                _count :{
+                    select : {
+                        videos : true
+                    }
+                }
+            }
+        })
+        if (folder){
+            return {status : 200 , data :folder}
+        }return {status : 400 , data : null}
+    }catch(error){
+        return {status : 500 , data : null}
+    }
+}
+
+export const moveVideoLocation = async (
+    videoId : string,
+    workspaceId:string,
+    folderId : string,
+)=>{
+    try{
+        const location = await client.video.update({
+            where : {
+                id : videoId
+            },
+            data : {
+                folderId : folderId || undefined ,
+                workSpaceId : workspaceId
+            }
+        })
+        if (location) return {status : 200, data : 'folder changed succesfully'}
+        return {status : 404 , data : 'workspace /folder not found'}
+    }catch(error){
+        return{status : 500 , data : 'Oops ! something went wrong'}
+    }
+}
+
+export const getPreviewVideo = async (videoId : string)=>{
+    try{
+        const user = await currentUser()
+        if (!user) return {status : 404}
+        const video = await client.video.findUnique({
+            where :{
+                id : videoId , 
+            },
+            select : {
+                title : true,
+                createdAt : true,
+                source: true,
+                description : true,
+                processing : true,
+                views : true,
+                summery : true,
+                User : {
+                    select : {
+                        firstname : true,
+                        lastname : true,
+                        image : true ,
+                        clerkid : true,
+                        trial : true ,
+                        subscription : {
+                            select : {
+                                plan : true ,
+                            },
+                        },
+                    },
+                },
+            },
+        })
+        if(video){
+            return {
+                status : 200 ,
+                data : video,
+                author :user.id === video.User?.clerkid ? true : false
+            }
+        }
+        return {
+            status : 404
+        }
+    } catch (error) {
+        return{status : 400}
+    }
+}
+
+export const sendEmailForFirstView = async(videoId:string)=> {
+ try {
+    const user = await currentUser()
+    if (!user) return {status : 404}
+    const firstViewSettings = await client.user.findUnique({
+        where : {
+            clerkid : user.id
+        },
+        select : {
+            firstView : true
+        }
+    })
+    if(!firstViewSettings?.firstView) return {status : 404}
+
+    const video = await client.video.findUnique({
+        where : {
+            id : videoId
+        },
+        select : {
+            title : true,
+            views : true,
+            User : {
+                select : {
+                    email : true
+                }
+            }
+        }
+    })
+    if (video && video.views === 0 ){
+        await client.video.update({
+            where: {
+                id : videoId,
+            },
+            data : {
+                views : video.views +1
+            }
+        })
+    }
+    if (!video) return {status: 404}
+    const { transporter, mailOptions } = await sendEmail(
+        video.User?.email!,
+        "You got a viewer 🚀",
+        `Your video ${video.title} just got first viewer.`,
+        `<body style="margin:0;padding:0;width:100%;height:100%;font-family:Arial,sans-serif;background-color:#121212;color:#ffffff;">
+<div style="max-width:600px;margin:0 auto;background-color:#1e1e1e;border-radius:8px;overflow:hidden;box-shadow:0 4px 8px rgba(0,0,0,0.3);">
+
+<!-- Header -->
+<div style="background-color:#00a87e;padding:20px;text-align:center;">
+<h1 style="margin:0;font-size:24px;color:#ffffff;">You're Invited!</h1>
+</div>
+
+<!-- Body -->
+<div style="padding:20px;text-align:center;">
+<p style="margin:0 0 20px;line-height:1.6;">Hi,</p>
+<p style="margin:0 0 20px;line-height:1.6;">Your video  just got first viewer..</p>
+</div>
+
+<!-- Footer -->
+<div style="margin-top:20px;padding:10px;text-align:center;background-color:#1e1e1e;font-size:12px;color:#7d7d7d;">
+<p>&copy; 2025 Odix. All rights reserved.</p>
+</div>
+
+</div>
+</body>
+</html>
+         `
+      );
+      transporter.sendMail(mailOptions,async(error,info)=>{
+        if(error){
+            console.log("⛔", error.message);
+        }else{
+            const notification = await client.user.update({
+                where : {
+                    clerkid : user.id
+                },
+                data : {
+                    notification : {
+                        create :{
+                            content : mailOptions.text
+                        }
+                    }
+                }
+            })
+            if(notification){
+                return {status: 200}
+            }
+      }
+      })
+
+ }catch(error){
+    console.log(error)
+ }
+}

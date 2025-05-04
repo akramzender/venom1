@@ -25,12 +25,27 @@ model User {
   workspace     Workspace[]
   videos        Video[]
   subscription  Subscription?
-  member        Member[]
+  members        Member[]
   notification  Notification[]
   sender        Invite[] @relation("sender")
   receiver      Invite[] @relation("receiver")
   trial         Boolean @default(false)
+  firstView     Boolean @default(false)
+  comment       Comment[]
   
+}
+model Comment {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  comment     String
+  createdAt   DateTime  @default(now())
+  reply       Comment[] @relation("reply")
+  Comment     Comment?  @relation("reply",fields: [commentId],references: [id])
+  commentId   String?   @db.Uuid
+  User        User?     @relation(fields: [userId],references: [id],onDelete: Cascade)
+  userId      String?   @db.Uuid
+  Video       Video?    @relation(fields: [videoId],references: [id],onDelete: Cascade)
+  videoId     String?   @db.Uuid
+
 }
 model Subscription {
       id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -60,7 +75,7 @@ model Workspace {
   type TYPE @default(PERSONAL)
   name String
   User User? @relation(fields: [userId], references: [id])
-  userId String? @unique @db.Uuid
+  userId String?  @db.Uuid
   createdAt DateTime @default(now())
   folders Folder[]
   videos Video[]
@@ -92,6 +107,8 @@ model Video {
   workSpaceId String @db.Uuid
   views Int @default(0)
   summery String?
+  comment       Comment[]
+
 
 }
 model Member {
